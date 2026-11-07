@@ -133,6 +133,10 @@ export const createLessonService = ({ Lesson, Roadmap, ai, tavus, shareTokens })
           console.error("Could not end Tavus conversation:", error.message);
         });
       }
+      // A QR scanned after this point should not try to join the ended room.
+      lesson.conversationId = undefined;
+      lesson.conversationUrl = undefined;
+      await lesson.save();
 
       return { lesson: toLessonView(lesson), roadmap };
     },
@@ -177,9 +181,11 @@ export const createLessonService = ({ Lesson, Roadmap, ai, tavus, shareTokens })
     async readShared(token) {
       const lesson = await Lesson.findById(shareTokens.verify(token));
       if (!lesson) throw notFound("Lesson not found");
+      // Only hand the phone a room that is still live, so it never joins a dead one.
+      const live = tavus.isConfigured && (await hasLiveConversation(lesson));
       return {
         topic: lesson.topic,
-        conversationUrl: lesson.conversationUrl ?? null,
+        conversationUrl: live ? lesson.conversationUrl : null,
         hasNotes: Boolean(lesson.notes),
       };
     },

@@ -1,23 +1,44 @@
 """In-memory vector store.
 
-The corpus is about 1,300 chunks, so an exact NumPy dot product is fast enough
-and removes the need for FAISS.
+The vectors are computed once, ahead of time, by scripts/build_index.py. At startup
+the server only loads them from disk. An exact NumPy dot product over a few
+thousand chunks takes well under a millisecond, so FAISS is not needed.
 """
 import json
-from pathlib import Path
 
 import numpy as np
 
+from app.rag.corpus import fingerprint, load_corpus
+
+
+class StaleIndexError(RuntimeError):
+    pass
+
 
 class VectorStore:
-    def __init__(self, dataset_path: Path, embeddings_path: Path):
-        with open(dataset_path, encoding="utf-8") as file:
-            self.chunks: list[dict] = json.load(file)
-        self.matrix: np.ndarray = np.load(embeddings_path)
-        if len(self.chunks) != self.matrix.shape[0]:
-            raise RuntimeError(
-                "Embeddings are out of date. Run: python scripts/build_index.py"
+    def __init__(self, chunks: list[dict], matrix: np.ndarray):
+        if len(chunks) != matrix.shape[0]:
+            raise StaleIndexError("Chunk count and vector count differ")
+        self.chunks = chunks
+        self.matrix = matrix
+
+    @classmethod
+    def load(cls, settings) -> "VectorStore":
+        chunks = load_corpus(settings.corpus_dir)
+        try:
+            meta = json.loads(settings.index_meta_path.read_text(encoding="utf-8"))
+            matrix = np.load(settings.embeddings_path)
+        except FileNotFoundError as error:
+            raise StaleIndexError(
+                "No vector index found. Run: python scripts/build_index.py"
+            ) from error
+
+        if meta.get("fingerprint") != fingerprint(chunks, settings.embedding_model):
+            raise StaleIndexError(
+                "The knowledge base changed since the vectors were built. "
+                "Run: python scripts/build_index.py"
             )
+        return cls(chunks, matrix)
 
     def search(self, query_vector: np.ndarray, top_k: int) -> list[dict]:
         scores = self.matrix @ query_vector

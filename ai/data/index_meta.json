@@ -1,0 +1,9 @@
+{
+  "fingerprint": "f1dc3a2bd25b476faf8b4918056ee96e504a043e0b5ae9cff122ac6ff92cce32",
+  "chunks": 1326,
+  "dimensions": 384,
+  "model": "sentence-transformers/all-MiniLM-L6-v2",
+  "sources": [
+    "biology_textbooks"
+  ]
+}

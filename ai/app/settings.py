@@ -18,8 +18,9 @@ class Settings:
         default_factory=lambda: os.getenv("MODEL_CACHE_DIR", str(BASE_DIR / ".model_cache"))
     )
     embedding_model: str = "sentence-transformers/all-MiniLM-L6-v2"
-    dataset_path: Path = BASE_DIR / "data" / "merged_dataset.json"
+    corpus_dir: Path = BASE_DIR / "data" / "corpus"
     embeddings_path: Path = BASE_DIR / "data" / "embeddings.npy"
+    index_meta_path: Path = BASE_DIR / "data" / "index_meta.json"
 
 
 settings = Settings()

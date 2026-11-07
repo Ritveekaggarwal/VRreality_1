@@ -1,0 +1,650 @@
+openapi: 3.0.3
+info:
+  title: VReality API
+  version: 2.0.0
+  description: |
+    Backend for VReality. All paths are relative to `/api`.
+
+    **Signing in for "Try it out":** call `POST /auth/login` (or `/auth/verify-email`),
+    copy `accessToken` from the response, click **Authorize** and paste it. Access
+    tokens last 15 minutes. `POST /auth/refresh` gives a new one using the
+    `refreshToken` cookie that login sets.
+
+    Errors always look like `{ "message": "...", "code": "OPTIONAL_CODE" }`.
+servers:
+  - url: /api
+    description: This server
+
+tags:
+  - name: Auth
+    description: Accounts, email codes, sessions
+  - name: Roadmap
+    description: AI-generated study plans
+  - name: Lesson
+    description: Classroom, doubts, notes, phone handoff
+  - name: Dashboard
+    description: Progress and profile
+  - name: System
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+    refreshCookie:
+      type: apiKey
+      in: cookie
+      name: refreshToken
+
+  parameters:
+    LessonId:
+      name: lessonId
+      in: path
+      required: true
+      schema: { type: string, pattern: "^[a-f0-9]{24}$" }
+    ShareToken:
+      name: token
+      in: path
+      required: true
+      description: Signed token from `POST /lesson/{lessonId}/share`. Valid for 6 hours.
+      schema: { type: string }
+
+  responses:
+    Error:
+      description: Request failed
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+    Unauthorized:
+      description: Missing, expired or revoked access token
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+    TooMany:
+      description: Rate limit reached
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+
+  schemas:
+    Error:
+      type: object
+      properties:
+        message: { type: string, example: That code is invalid or has expired. }
+        code: { type: string, example: INVALID_OTP }
+
+    Message:
+      type: object
+      properties:
+        message: { type: string }
+
+    User:
+      type: object
+      properties:
+        id: { type: string }
+        firstName: { type: string }
+        lastName: { type: string }
+        email: { type: string, format: email }
+        phone: { type: string }
+        dob: { type: string, format: date-time }
+        city: { type: string }
+        classStudying: { type: string }
+        verified: { type: boolean }
+        hasPassword: { type: boolean, description: false for Google-only accounts }
+
+    Session:
+      type: object
+      description: Also sets an httpOnly `refreshToken` cookie (path `/api/auth`, 7 days).
+      properties:
+        user: { $ref: "#/components/schemas/User" }
+        accessToken: { type: string, description: JWT, valid for 15 minutes }
+
+    Chapter:
+      type: object
+      properties:
+        id: { type: integer, example: 1 }
+        title: { type: string, example: What are Enzymes? }
+        description: { type: string }
+        learning_objectives: { type: array, items: { type: string } }
+        difficulty: { type: integer, minimum: 1, maximum: 5 }
+        estimated_minutes: { type: integer, example: 10 }
+        status: { type: string, enum: [READY, LOCKED, COMPLETED] }
+        completed: { type: boolean }
+
+    Roadmap:
+      type: object
+      properties:
+        _id: { type: string }
+        topics: { type: array, items: { type: string } }
+        durationMinutes: { type: integer }
+        pace: { type: string, enum: [slow, moderate, fast] }
+        tone: { type: string, enum: [beginner, technical, practical] }
+        chapters: { type: array, items: { $ref: "#/components/schemas/Chapter" } }
+        active: { type: boolean }
+
+    Doubt:
+      type: object
+      properties:
+        question: { type: string }
+        answer: { type: string }
+
+    Lesson:
+      type: object
+      properties:
+        id: { type: string }
+        roadmapId: { type: string }
+        chapterIndex: { type: integer }
+        topic: { type: string }
+        script: { type: string, description: Lecture script generated from the textbooks }
+        notes: { type: string, description: Empty until notes are generated }
+        doubts: { type: array, items: { $ref: "#/components/schemas/Doubt" } }
+        conversationId: { type: string, nullable: true }
+        conversationUrl: { type: string, nullable: true, description: Tavus room to join }
+        completed: { type: boolean }
+
+security:
+  - bearerAuth: []
+
+paths:
+  /health:
+    get:
+      tags: [System]
+      summary: Health check
+      description: Also starts waking the AI service if it is asleep.
+      security: []
+      responses:
+        "200":
+          description: Ready
+          content:
+            application/json:
+              example: { status: ok }
+        "503": { description: Database still connecting }
+
+  /auth/register:
+    post:
+      tags: [Auth]
+      summary: Create an account and email a 6-digit code
+      description: |
+        Re-registering an email that was never verified overwrites the old details and
+        sends a fresh code, so a lost email never locks anyone out.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [firstName, email, phone, dob, password]
+              properties:
+                firstName: { type: string, example: Asha }
+                lastName: { type: string, example: Rao }
+                email: { type: string, format: email, example: asha@example.com }
+                phone: { type: string, example: "9876543210" }
+                dob: { type: string, format: date, example: "2004-05-01" }
+                city: { type: string }
+                classStudying: { type: string }
+                password:
+                  type: string
+                  minLength: 8
+                  description: At least 8 characters, with a letter and a number
+                  example: learning1
+      responses:
+        "201": { description: Code sent, content: { application/json: { schema: { $ref: "#/components/schemas/Message" } } } }
+        "400": { $ref: "#/components/responses/Error" }
+        "409": { description: Email already verified, or phone in use, content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } } }
+        "429": { $ref: "#/components/responses/TooMany" }
+        "503": { description: "Email provider not configured (code: EMAIL_NOT_CONFIGURED)", content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } } }
+
+  /auth/verify-email:
+    post:
+      tags: [Auth]
+      summary: Confirm the emailed code and sign in
+      description: Five wrong guesses delete the code. Codes expire after 5 minutes.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email, otp]
+              properties:
+                email: { type: string, format: email }
+                otp: { type: string, pattern: "^\\d{6}$", example: "913190" }
+      responses:
+        "200": { description: Signed in, content: { application/json: { schema: { $ref: "#/components/schemas/Session" } } } }
+        "400": { $ref: "#/components/responses/Error" }
+
+  /auth/login:
+    post:
+      tags: [Auth]
+      summary: Sign in with email and password
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email, password]
+              properties:
+                email: { type: string, format: email, example: asha@example.com }
+                password: { type: string, example: learning1 }
+      responses:
+        "200": { description: Signed in, content: { application/json: { schema: { $ref: "#/components/schemas/Session" } } } }
+        "400": { description: "Account uses Google (code: USE_GOOGLE)", content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } } }
+        "401": { description: "Wrong email or password (code: INVALID_CREDENTIALS)", content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } } }
+        "403": { description: "Email not verified. A new code is sent (code: EMAIL_NOT_VERIFIED)", content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } } }
+        "429": { $ref: "#/components/responses/TooMany" }
+
+  /auth/google:
+    post:
+      tags: [Auth]
+      summary: Sign in with a Google ID token
+      description: Creates the account on first use, and links to an existing account with the same email.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [credential]
+              properties:
+                credential: { type: string, description: ID token from Google Identity Services }
+      responses:
+        "200": { description: Signed in, content: { application/json: { schema: { $ref: "#/components/schemas/Session" } } } }
+        "401": { $ref: "#/components/responses/Error" }
+
+  /auth/resend-otp:
+    post:
+      tags: [Auth]
+      summary: Send a new verification code
+      description: Always returns 200, so it never reveals whether an account exists.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { type: object, required: [email], properties: { email: { type: string, format: email } } }
+      responses:
+        "200": { description: Accepted, content: { application/json: { schema: { $ref: "#/components/schemas/Message" } } } }
+        "429": { $ref: "#/components/responses/TooMany" }
+
+  /auth/forgot-password:
+    post:
+      tags: [Auth]
+      summary: Email a password reset code
+      description: Always returns 200, so it never reveals whether an account exists.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { type: object, required: [email], properties: { email: { type: string, format: email } } }
+      responses:
+        "200": { description: Accepted, content: { application/json: { schema: { $ref: "#/components/schemas/Message" } } } }
+
+  /auth/verify-reset-otp:
+    post:
+      tags: [Auth]
+      summary: Check a reset code before asking for the new password
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email, otp]
+              properties:
+                email: { type: string, format: email }
+                otp: { type: string, pattern: "^\\d{6}$" }
+      responses:
+        "200": { description: Code is valid }
+        "400": { $ref: "#/components/responses/Error" }
+
+  /auth/reset-password:
+    post:
+      tags: [Auth]
+      summary: Set a new password
+      description: Signs the account out on every device.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email, otp, newPassword]
+              properties:
+                email: { type: string, format: email }
+                otp: { type: string, pattern: "^\\d{6}$" }
+                newPassword: { type: string, minLength: 8 }
+      responses:
+        "200": { description: Password updated }
+        "400": { $ref: "#/components/responses/Error" }
+
+  /auth/refresh:
+    post:
+      tags: [Auth]
+      summary: Get a new access token from the refresh cookie
+      description: Rotates the refresh cookie. Two tabs refreshing at once both succeed.
+      security:
+        - refreshCookie: []
+      responses:
+        "200": { description: New session, content: { application/json: { schema: { $ref: "#/components/schemas/Session" } } } }
+        "401": { description: "No valid session (code: NO_SESSION)", content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } } }
+
+  /auth/logout:
+    post:
+      tags: [Auth]
+      summary: Sign out this device
+      security:
+        - refreshCookie: []
+      responses:
+        "200": { description: Signed out }
+
+  /auth/logout-all:
+    post:
+      tags: [Auth]
+      summary: Sign out every device
+      responses:
+        "200": { description: Signed out everywhere }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+
+  /auth/me:
+    get:
+      tags: [Auth]
+      summary: The signed-in user
+      responses:
+        "200":
+          description: Current user
+          content:
+            application/json:
+              schema: { type: object, properties: { user: { $ref: "#/components/schemas/User" } } }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+
+  /roadmap/generate:
+    post:
+      tags: [Roadmap]
+      summary: Build a new roadmap with the AI service
+      description: |
+        Replaces the active roadmap. Only the first chapter starts unlocked.
+        Can take up to a minute, longer if the AI service was asleep.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [topics, duration, pace, tone]
+              properties:
+                topics:
+                  type: array
+                  minItems: 1
+                  maxItems: 6
+                  items: { type: string }
+                  example: [Enzymes, DNA replication]
+                duration: { type: integer, minimum: 5, maximum: 6000, description: Total minutes, example: 60 }
+                pace: { type: string, enum: [slow, moderate, fast] }
+                tone: { type: string, enum: [beginner, technical, practical] }
+      responses:
+        "201":
+          description: Roadmap created
+          content:
+            application/json:
+              schema: { type: object, properties: { roadmap: { $ref: "#/components/schemas/Roadmap" } } }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "502": { description: AI service failed or is waking up, content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } } }
+
+  /roadmap/current:
+    get:
+      tags: [Roadmap]
+      summary: The active roadmap
+      responses:
+        "200":
+          description: Active roadmap
+          content:
+            application/json:
+              schema: { type: object, properties: { roadmap: { $ref: "#/components/schemas/Roadmap" } } }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { description: No roadmap yet }
+
+  /lesson/start:
+    post:
+      tags: [Lesson]
+      summary: Open a chapter's lesson
+      description: |
+        The first time, generates the script and creates a Tavus conversation. After
+        that, reuses both while the conversation is still active. Simultaneous calls
+        for the same chapter share one request, so a double click never pays twice.
+        If Tavus fails, the lesson still opens with `tavusAvailable: false`.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [roadmapId, chapterIndex]
+              properties:
+                roadmapId: { type: string }
+                chapterIndex: { type: integer, minimum: 0, example: 0 }
+      responses:
+        "200":
+          description: Lesson ready
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  lesson: { $ref: "#/components/schemas/Lesson" }
+                  chapter:
+                    type: object
+                    properties:
+                      title: { type: string }
+                      description: { type: string }
+                      estimatedMinutes: { type: integer }
+                  tavusAvailable: { type: boolean }
+                  tavusError: { type: string, nullable: true }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { description: "Previous chapter not finished (code: CHAPTER_LOCKED)", content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } } }
+        "404": { description: Roadmap or chapter not found }
+
+  /lesson/{lessonId}/complete:
+    post:
+      tags: [Lesson]
+      summary: Finish a lesson and unlock the next chapter
+      description: Also ends the Tavus conversation so it stops using credits.
+      parameters: [{ $ref: "#/components/parameters/LessonId" }]
+      responses:
+        "200":
+          description: Completed
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  lesson: { $ref: "#/components/schemas/Lesson" }
+                  roadmap: { $ref: "#/components/schemas/Roadmap" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { description: Not found, or not your lesson }
+
+  /lesson/{lessonId}/doubt:
+    post:
+      tags: [Lesson]
+      summary: Answer a doubt from the textbooks
+      description: The answer is saved with the lesson and included when notes are regenerated.
+      parameters: [{ $ref: "#/components/parameters/LessonId" }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [question]
+              properties:
+                question: { type: string, maxLength: 2000, example: Why is an enzyme not used up? }
+      responses:
+        "200": { description: Answer, content: { application/json: { schema: { $ref: "#/components/schemas/Doubt" } } } }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { description: Not found, or not your lesson }
+
+  /lesson/{lessonId}/notes:
+    post:
+      tags: [Lesson]
+      summary: Generate study notes
+      description: Returns saved notes unless `force` is true, which rewrites them including all doubts.
+      parameters: [{ $ref: "#/components/parameters/LessonId" }]
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                force: { type: boolean, default: false }
+      responses:
+        "200":
+          description: Notes
+          content:
+            application/json:
+              schema: { type: object, properties: { notes: { type: string } } }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { description: Not found, or not your lesson }
+
+  /lesson/{lessonId}/notes.pdf:
+    get:
+      tags: [Lesson]
+      summary: Download notes as a PDF
+      parameters: [{ $ref: "#/components/parameters/LessonId" }]
+      responses:
+        "200":
+          description: PDF file
+          content:
+            application/pdf:
+              schema: { type: string, format: binary }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { description: Notes not generated yet }
+
+  /lesson/{lessonId}/share:
+    post:
+      tags: [Lesson]
+      summary: Create the phone QR token
+      description: The QR code encodes `https://<site>/m/<token>`.
+      parameters: [{ $ref: "#/components/parameters/LessonId" }]
+      responses:
+        "200":
+          description: Token
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  token: { type: string }
+                  expiresAt: { type: string, format: date-time }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+
+  /lesson/shared/{token}:
+    get:
+      tags: [Lesson]
+      summary: Open a lesson on a phone (no sign-in)
+      description: Returns only what the phone needs. The script and doubts are never exposed.
+      security: []
+      parameters: [{ $ref: "#/components/parameters/ShareToken" }]
+      responses:
+        "200":
+          description: Shared lesson
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  topic: { type: string }
+                  conversationUrl: { type: string, nullable: true }
+                  hasNotes: { type: boolean }
+        "410": { description: "Token expired or invalid (code: SHARE_EXPIRED)", content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } } }
+
+  /lesson/shared/{token}/notes.pdf:
+    get:
+      tags: [Lesson]
+      summary: Download notes on a phone (no sign-in)
+      security: []
+      parameters: [{ $ref: "#/components/parameters/ShareToken" }]
+      responses:
+        "200":
+          description: PDF file
+          content:
+            application/pdf:
+              schema: { type: string, format: binary }
+        "404": { description: Notes not generated yet }
+        "410": { description: Token expired or invalid }
+
+  /dashboard:
+    get:
+      tags: [Dashboard]
+      summary: Progress overview
+      responses:
+        "200":
+          description: Overview
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  user: { $ref: "#/components/schemas/User" }
+                  roadmap:
+                    nullable: true
+                    type: object
+                    properties:
+                      id: { type: string }
+                      topics: { type: array, items: { type: string } }
+                      chapterCount: { type: integer }
+                  lessons:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        id: { type: string }
+                        topic: { type: string }
+                        chapterIndex: { type: integer }
+                        completed: { type: boolean }
+                        hasNotes: { type: boolean }
+                  completed: { type: integer }
+                  total: { type: integer }
+                  nextChapter:
+                    nullable: true
+                    type: object
+                    properties:
+                      index: { type: integer }
+                      title: { type: string }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+
+  /dashboard/profile:
+    put:
+      tags: [Dashboard]
+      summary: Update profile
+      description: Email and verification status can't be changed here. Unknown fields are ignored.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [firstName]
+              properties:
+                firstName: { type: string }
+                lastName: { type: string }
+                phone: { type: string }
+                city: { type: string }
+                classStudying: { type: string }
+      responses:
+        "200":
+          description: Updated
+          content:
+            application/json:
+              schema: { type: object, properties: { user: { $ref: "#/components/schemas/User" } } }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "409": { description: Phone number in use }

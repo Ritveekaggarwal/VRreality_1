@@ -422,6 +422,20 @@ describe("doubts, notes and QR sharing", () => {
     assert.equal(pdf.status, 200);
   });
 
+  test("the phone joins the same conversation, and gets no room once the class ends", async () => {
+    const { token, lessonId } = await openLesson();
+    const share = await call(`/lesson/${lessonId}/share`, { method: "POST", token });
+    const before = await call(`/lesson/shared/${share.data.token}`);
+    assert.equal(before.data.conversationUrl, "https://tavus.daily.co/c1");
+    assert.equal(tavusCalls.created, 1);
+
+    await call(`/lesson/${lessonId}/complete`, { method: "POST", token });
+    const after = await call(`/lesson/shared/${share.data.token}`);
+    assert.equal(after.status, 200);
+    assert.equal(after.data.conversationUrl, null);
+    assert.equal(tavusCalls.created, 1);
+  });
+
   test("a raw lesson id or tampered token gives no access", async () => {
     const { lessonId } = await openLesson();
     assert.equal((await call(`/lesson/shared/${lessonId}`)).status, 410);
@@ -438,6 +452,27 @@ describe("doubts, notes and QR sharing", () => {
         body: { question: "x" },
       });
       assert.equal(status, 404, path);
+    }
+  });
+});
+
+describe("API docs", () => {
+  test("Swagger UI and spec are served, and the spec lists every mounted route", async () => {
+    const page = await fetch(`${base}/api/docs/`);
+    assert.equal(page.status, 200);
+    assert.match(await page.text(), /swagger-ui/);
+
+    const { data: spec } = await call("/docs/openapi.json");
+    const documented = Object.keys(spec.paths);
+    for (const path of [
+      "/auth/login",
+      "/roadmap/generate",
+      "/lesson/start",
+      "/lesson/{lessonId}/share",
+      "/lesson/shared/{token}",
+      "/dashboard/profile",
+    ]) {
+      assert.ok(documented.includes(path), `${path} is documented`);
     }
   });
 });

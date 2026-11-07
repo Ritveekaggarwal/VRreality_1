@@ -5,6 +5,7 @@ import express from "express";
 import helmet from "helmet";
 import morgan from "morgan";
 import { isDatabaseReady } from "./config/database.js";
+import { createDocsRoutes } from "./docs.js";
 import { errorHandler, notFoundHandler } from "./middleware/error.middleware.js";
 import { createAuthRoutes } from "./modules/auth/auth.routes.js";
 import { createDashboardRoutes } from "./modules/dashboard/dashboard.routes.js";
@@ -40,6 +41,8 @@ export const createApp = (env, container) => {
     const ready = isDatabaseReady();
     res.status(ready ? 200 : 503).json({ status: ready ? "ok" : "starting" });
   });
+
+  app.use("/api/docs", createDocsRoutes());
 
   app.use("/api", (req, res, next) => {
     // Personal data must never be cached by the CDN in front of the API.

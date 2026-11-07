@@ -20,7 +20,7 @@ if not settings.groq_api_key:
     raise RuntimeError("GROQ_API_KEY is not set")
 
 embedder = OnnxEmbedder(settings.embedding_model, settings.model_cache_dir)
-store = VectorStore(settings.dataset_path, settings.embeddings_path)
+store = VectorStore.load(settings)
 tutor = Tutor(
     Retriever(embedder, store),
     LlmClient(settings.groq_api_key, settings.llm_model),
