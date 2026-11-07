@@ -43,6 +43,8 @@ export const createApp = (env, container) => {
   });
 
   app.use("/api/docs", createDocsRoutes());
+  // Opening the bare service address shows the API reference instead of a 404.
+  app.get("/", (req, res) => res.redirect("/api/docs/"));
 
   app.use("/api", (req, res, next) => {
     // Personal data must never be cached by the CDN in front of the API.

@@ -2,6 +2,10 @@
   "$schema": "https://openapi.vercel.sh/vercel.json",
   "rewrites": [
     {
+      "source": "/api/docs/",
+      "destination": "https://vreality-api.onrender.com/api/docs/"
+    },
+    {
       "source": "/api/:path*",
       "destination": "https://vreality-api.onrender.com/api/:path*"
     },

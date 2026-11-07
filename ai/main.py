@@ -58,6 +58,16 @@ def run(action, label: str):
         raise HTTPException(status_code=502, detail=f"{label} failed. Please try again.")
 
 
+@app.get("/")
+def root():
+    return {
+        "service": "VReality AI",
+        "status": "running",
+        "note": "Internal service. Only the VReality API can call it.",
+        "health": "/health",
+    }
+
+
 @app.get("/health")
 def health():
     return {"status": "healthy", "embedder_ready": embedder.ready, "chunks": len(store.chunks)}
