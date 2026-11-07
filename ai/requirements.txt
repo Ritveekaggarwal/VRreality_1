@@ -1,0 +1,8 @@
+# Runtime dependencies only. torch, sentence-transformers, faiss and pandas are
+# deliberately absent: they are what pushed this service past 512 MB of RAM.
+fastapi==0.162.0
+uvicorn==0.54.0
+groq==1.7.0
+numpy==2.4.6
+fastembed==0.9.1
+python-dotenv==1.2.4

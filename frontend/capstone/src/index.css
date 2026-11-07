@@ -1,0 +1,88 @@
+@import "tailwindcss";
+@import "@fontsource-variable/bricolage-grotesque";
+@import "@fontsource-variable/dm-sans";
+
+@theme {
+  --color-ink: #06141b;
+  --color-abyss: #0a1f28;
+  --color-surface: #0f2a34;
+  --color-raised: #163843;
+  --color-line: #21464f;
+  --color-helix: #3ddbc3;
+  --color-helix-deep: #15a08e;
+  --color-amber: #ffb648;
+  --color-coral: #ff7a59;
+  --color-text: #eaf6f3;
+  --color-muted: #9dbcba;
+
+  --font-display: "Bricolage Grotesque Variable", ui-sans-serif, system-ui, sans-serif;
+  --font-sans: "DM Sans Variable", ui-sans-serif, system-ui, sans-serif;
+}
+
+@layer base {
+  html {
+    scroll-behavior: smooth;
+    background: var(--color-ink);
+  }
+
+  body {
+    min-height: 100dvh;
+    background: var(--color-ink);
+    color: var(--color-text);
+    font-family: var(--font-sans);
+    -webkit-font-smoothing: antialiased;
+  }
+
+  h1,
+  h2,
+  h3 {
+    font-family: var(--font-display);
+    letter-spacing: -0.02em;
+    text-wrap: balance;
+  }
+
+  :focus-visible {
+    outline: 2px solid var(--color-helix);
+    outline-offset: 2px;
+  }
+
+  button:not(:disabled),
+  a {
+    cursor: pointer;
+  }
+}
+
+@utility text-gradient {
+  background: linear-gradient(100deg, var(--color-helix) 10%, var(--color-amber) 90%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+
+@utility panel {
+  background: color-mix(in srgb, var(--color-surface) 82%, transparent);
+  border: 1px solid var(--color-line);
+  border-radius: 1.25rem;
+}
+
+/* Soft colour wash behind inner pages, so they share the hero's atmosphere. */
+@utility page-glow {
+  background:
+    radial-gradient(60rem 30rem at 85% -10%, rgb(61 219 195 / 0.1), transparent 70%),
+    radial-gradient(40rem 26rem at 0% 30%, rgb(255 182 72 / 0.05), transparent 70%),
+    var(--color-ink);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  html {
+    scroll-behavior: auto;
+  }
+
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}

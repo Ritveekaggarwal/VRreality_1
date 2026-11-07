@@ -1,0 +1,64 @@
+# Render Blueprint: creates both backend services on the free plan.
+# Dashboard > New > Blueprint > pick this repository.
+# If Render renames a service because its name is taken, update AI_SERVER_URL below
+# and the destination in frontend/capstone/vercel.json to match.
+services:
+  - type: web
+    name: vreality-ai
+    runtime: python
+    plan: free
+    rootDir: ai
+    buildCommand: pip install -r requirements.txt && python scripts/fetch_model.py
+    startCommand: uvicorn main:app --host 0.0.0.0 --port $PORT --workers 1
+    healthCheckPath: /health
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.11.9
+      - key: GROQ_API_KEY
+        sync: false
+      - key: AI_SERVICE_TOKEN
+        generateValue: true
+
+  - type: web
+    name: vreality-api
+    runtime: node
+    plan: free
+    rootDir: backend
+    buildCommand: npm ci --omit=dev
+    startCommand: node --max-old-space-size=384 src/server.js
+    healthCheckPath: /api/health
+    envVars:
+      - key: NODE_VERSION
+        value: 22
+      - key: NODE_ENV
+        value: production
+      # Requests pass through Vercel and then Render's own proxy.
+      - key: TRUST_PROXY_HOPS
+        value: 2
+      - key: JWT_SECRET
+        generateValue: true
+      - key: AI_SERVER_URL
+        value: https://vreality-ai.onrender.com
+      - key: AI_SERVICE_TOKEN
+        fromService:
+          type: web
+          name: vreality-ai
+          envVarKey: AI_SERVICE_TOKEN
+      - key: EMAIL_PROVIDER
+        value: brevo
+      - key: EMAIL_FROM_NAME
+        value: VReality
+      - key: MONGO_URI
+        sync: false
+      - key: GOOGLE_AUTH_CLIENT_ID
+        sync: false
+      - key: EMAIL_FROM
+        sync: false
+      - key: BREVO_API_KEY
+        sync: false
+      - key: TAVUS_API_KEY
+        sync: false
+      - key: TAVUS_PERSONA_ID
+        sync: false
+      - key: TAVUS_REPLICA_ID
+        sync: false
